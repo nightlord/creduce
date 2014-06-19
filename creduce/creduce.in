@@ -33,7 +33,7 @@
 #   measure hits by pass
 #   consider turning on caching only for passes that benefit
 # use IPC::Run3 instead of system?
-# use clang-format
+# use clang-format 
 # merge adjacent strings?
 # support adding/removing passes via the command line
 # maybe add a format string reduction pass that eliminates a format
@@ -55,6 +55,7 @@ use Benchmark::Timer;
 use File::Spec;
 use File::Temp;
 use File::Copy;
+use Data::Dumper;
 
 # Load module `Sys::CPU' if it is available.
 eval { require Sys::CPU; Sys::CPU->import(); };
@@ -65,86 +66,41 @@ use creduce_utils;
 ######################################################################
 
 my $GIVEUP_CONSTANT = 1000;
-my $DEBUG_SMP       = 0;
-my $NPROCS          = 1;
+my $DEBUG_SMP = 0;
+my $NPROCS = 1;
 if (defined(&Sys::CPU::cpu_count)) {
-  $NPROCS = Sys::CPU::cpu_count();
+    $NPROCS = Sys::CPU::cpu_count();
 }
 my $PRINT_DIFF = 0;
-my $SANITIZE   = 0;
+my $SANITIZE = 0;
 my $SANITY;
 my $SKIP_FIRST;
 my $SAVE_TEMPS;
-my $SLOW    = 0;
+my $SLOW = 0;
 my $SLLOOWW = 0;
 my $NODEFAULT;
-
 # if set, cache results of the delta test
 #
-my $CACHE    = 0;
-my $FUZZ     = 0;
+my $CACHE = 0;
+my $FUZZ = 0;
 my $SCAN_DIR = "";
 
 my @options = (
-
 #    ["--add-pass",            "call",    0, \&process_foo,     "Also run the specified pass; requires three sub-arguments: pass sub-pass priority"],
-  ["--cache", "const", 1, \$CACHE, "Cache results of delta tests"],
-  [
-    "--fuzz",
-    "const",
-    1,
-    \$FUZZ,
-    "Make C-Reduce more effective as a fuzzer, but also slower (best used in conjunction with --skip-initial-passes)"
-  ],
-  [
-    "-n", "integer", 1, \$NPROCS,
-    "Set number of creduce processes to run simultaneously", "<N>"
-  ],
-  [
-    "--no-default-passes", "const",
-    1,                     \$NODEFAULT,
-    "Do not run the default passes"
-  ],
-  [
-    "--no-give-up",
-    "const",
-    0,
-    \$GIVEUP_CONSTANT,
-    "Don't give up on a pass that hasn't made progress for ${GIVEUP_CONSTANT} iterations"
-  ],
-  [
-    "--print-diff", "const", 1, \$PRINT_DIFF,
-    "Show changes made by transformations, for debugging"
-  ],
-  [
-    "--sanitize", "const", 1, \$SANITIZE,
-    "Attempt to obscure details from the original source file"
-  ],
-  [
-    "--sanity-checks", "const", 1, \$SANITY,
-    "Ensure the delta test succeeds before starting each pass"
-  ],
-  [
-    "--save-temps", "const", 1, \$SAVE_TEMPS,
-    "Don't delete /tmp/creduce-xxxxxx directories on termination"
-  ],
-  [
-    "--skip-initial-passes", "const", 1, \$SKIP_FIRST,
-    "Skip initial passes (useful if input is already reduced)"
-  ],
-  [
-    "--slow",
-    "const",
-    1,
-    \$SLOW,
-    "Run additional passes that may improve final output slightly, but that might also be very slow"
-  ],
-  ["--sllooww", "const", 1, \$SLLOOWW, "Like --slow but more so"],
-  [
-    "--scan-dir", "string", 1, \$SCAN_DIR,
-    "Scan dir, dir contains: testx.sh filex.c"
-  ],
-  ["--verbose", "const", 1, \$VERBOSE, "Print debug information"],
+    ["--cache",               "const",   1, \$CACHE,           "Cache results of delta tests"],
+    ["--fuzz",                "const",   1, \$FUZZ,            "Make C-Reduce more effective as a fuzzer, but also slower (best used in conjunction with --skip-initial-passes)"],
+    ["-n",                    "integer", 1, \$NPROCS,          "Set number of creduce processes to run simultaneously", "<N>"],
+    ["--no-default-passes",   "const",   1, \$NODEFAULT,       "Do not run the default passes"],
+    ["--no-give-up",          "const",   0, \$GIVEUP_CONSTANT, "Don't give up on a pass that hasn't made progress for ${GIVEUP_CONSTANT} iterations"],
+    ["--print-diff",          "const",   1, \$PRINT_DIFF,      "Show changes made by transformations, for debugging"],
+    ["--sanitize",            "const",   1, \$SANITIZE,        "Attempt to obscure details from the original source file"],
+    ["--sanity-checks",       "const",   1, \$SANITY,          "Ensure the delta test succeeds before starting each pass"],
+    ["--save-temps",          "const",   1, \$SAVE_TEMPS,      "Don't delete /tmp/creduce-xxxxxx directories on termination"],
+    ["--skip-initial-passes", "const",   1, \$SKIP_FIRST,      "Skip initial passes (useful if input is already reduced)"],
+    ["--slow",                "const",   1, \$SLOW,            "Run additional passes that may improve final output slightly, but that might also be very slow"],
+    ["--sllooww",             "const",   1, \$SLLOOWW,         "Like --slow but more so"],
+    ["--scan-dir",            "string",   1, \$SCAN_DIR,        "Scan dir, dir contains: testx.sh filex.c"],
+    ["--verbose",             "const",   1, \$VERBOSE,         "Print debug information"],
 );
 
 my $help = creduce_config::PACKAGE_STRING . " -- C and C++ program reducer";
@@ -154,17 +110,16 @@ usage: creduce [options] test_script.sh file.c
 USAGE
 
 sub usage() {
-  print $usage_text;
-  die;
+    print $usage_text;
+    die;
 }
 
-Getopt::Tabular::SetHelp($help, $usage_text);
+Getopt::Tabular::SetHelp ($help, $usage_text);
 Getopt::Tabular::SetOptionPatterns qw|(--)([\w-]+) (-)(\w+)|;
 Getopt::Tabular::SetHelpOption("--help");
 GetOptions(\@options, \@ARGV) or exit 1;
-
 # At this point, @ARGV should contain exactly two file names.
-unless ($SCAN_DIR) {
+unless($SCAN_DIR){
   usage() unless (@ARGV == 2);
 }
 
@@ -177,18 +132,18 @@ my $CACHE_PRUNE_SIZE = 5000;
 my @custom_methods;
 
 sub process_foo {
-  my ($opt, $args, $dest) = @_;
-  my $x       = scalar(@$args);
-  my $name    = shift @$args;
-  my $subpass = shift @$args;
-  my $pri     = shift @$args;
-  return 0 unless defined $name && defined $subpass && defined $pri;
-  my %pass = ();
-  $pass{"name"} = $name;
-  $pass{"arg"}  = $subpass;
-  $pass{"pri"}  = $pri;
-  push @custom_methods, \%pass;
-  return 1;
+    my ($opt, $args, $dest) = @_;
+    my $x = scalar(@$args);
+    my $name = shift @$args;
+    my $subpass = shift @$args;
+    my $pri = shift @$args;
+    return 0 unless defined $name && defined $subpass && defined $pri;
+    my %pass = ();
+    $pass{"name"} = $name;
+    $pass{"arg"} = $subpass;
+    $pass{"pri"} = $pri;
+    push @custom_methods, \%pass;
+    return 1;
 }
 
 ######################################################################
@@ -196,14 +151,14 @@ sub process_foo {
 my $orig_file_size;
 
 sub print_pct ($) {
-  (my $l) = @_;
-  my $pct = 100 - ($l * 100.0 / $orig_file_size);
-  printf "(%.1f %%, $l bytes)\n", $pct;
+    (my $l) = @_;
+    my $pct = 100 - ($l*100.0/$orig_file_size);
+    printf "(%.1f %%, $l bytes)\n", $pct;
 }
 
 # these are set at startup time and never change
 my $test;
-my $trial_num = 0;
+my $trial_num = 0;   
 
 my $toreduce;
 my $toreduce_orig;
@@ -222,91 +177,87 @@ my $toreduce_best;
 my @tmpdirs;
 
 sub make_tmpdir () {
-  my $dir = File::Temp::tempdir(
-    "creduce-XXXXXX",
-    $SAVE_TEMPS ? (CLEANUP => 0) : (CLEANUP => 1),
-    DIR => File::Spec->tmpdir
-  );
-  push @tmpdirs, $dir;
-  return $dir;
+    my $dir = File::Temp::tempdir("creduce-XXXXXX", 
+				  $SAVE_TEMPS ? (CLEANUP => 0) : (CLEANUP => 1), 
+				  DIR => File::Spec->tmpdir);
+    push @tmpdirs, $dir;
+    return $dir;
 }
 
 sub remove_tmpdirs () {
-  return if $SAVE_TEMPS;
-  while (my $dir = shift(@tmpdirs)) {
-    File::Path::rmtree($dir, 0, 0);
-  }
+    return if $SAVE_TEMPS;
+    while (my $dir = shift(@tmpdirs)) {
+	File::Path::rmtree ($dir, 0, 0);
+    }
 }
 
 sub run_test ($) {
-  (my $fn) = @_;
-  my $res;
-  if ($VERBOSE) {
-    $res = runit "$test $fn";
-  }
-  else {
-    $res = runit "$test $fn >/dev/null 2>&1";
-  }
-  return ($res == 0);
+    (my $fn) = @_;
+    my $res;
+    if ($VERBOSE) {
+	$res = runit "$test $fn";
+    } else {
+	$res = runit "$test $fn >/dev/null 2>&1";
+    }
+    return ($res == 0);
 }
 
 sub sanity_check () {
-  print "sanity check... " if $VERBOSE;
-  my $tmpdir = make_tmpdir();
-  chdir $tmpdir or die;
-  File::Copy::copy($toreduce_best, $toreduce) or die;
-  run_test($toreduce) or die "test (and sanity check) fails";
-  print "successful\n" if $VERBOSE;
-  chdir $ORIG_DIR or die;
-  remove_tmpdirs();
+    print "sanity check... " if $VERBOSE;
+    my $tmpdir = make_tmpdir();
+    chdir $tmpdir or die;
+    File::Copy::copy($toreduce_best,$toreduce) or die;
+    run_test($toreduce) or die "test (and sanity check) fails";
+    print "successful\n" if $VERBOSE;
+    chdir $ORIG_DIR or die;
+    remove_tmpdirs();
 }
 
 my $old_len = 1000000000;
-my %cache   = ();
+my %cache = ();
 
 sub delta_test ($$$$) {
-  (my $method, my $arg, my $state, my $fn) = @_;
-  my $result;
-  if ($CACHE) {
-    my $prog = read_file($fn);
-    $result = $cache{-s $fn}{$prog};
-  }
-  if (defined($result)) {
-    print "(hit= $result)";
-  }
-  else {
-    $result = run_test($fn);
-  }
-  return $result ? 1 : 0;
+    (my $method, my $arg, my $state, my $fn) = @_;
+    my $result;
+    if ($CACHE) {
+	my $prog = read_file($fn);
+	$result = $cache{-s $fn}{$prog};
+    }
+    if (defined($result)) {
+	print "(hit= $result)";
+    } else {    
+	$result = run_test ($fn);
+    }
+    return $result ? 1 : 0;
 }
 
 sub call_prereq_check ($) {
-  (my $method) = @_;
-  my $str = $method . "::check_prereqs";
-  no strict "refs";
-  &${str}() or die "prereqs not found for pass $method";
-  print "successfully checked prereqs for $method\n" if $VERBOSE;
+    (my $method) = @_;
+    my $str = $method."::check_prereqs";
+    no strict "refs";
+    &${str}() or die "prereqs not found for pass $method";
+    print "successfully checked prereqs for $method\n" if $VERBOSE;
 }
 
 sub call_new ($$$) {
-  (my $method, my $fn, my $arg) = @_;
-  my $str = $method . "::new";
-  no strict "refs";
-  return &${str}($fn, $arg);
+    (my $method,my $fn,my $arg) = @_;    
+    my $str = $method."::new";
+    no strict "refs";
+    return &${str}($fn,$arg);
 }
 
 sub call_advance ($$$$) {
-  (my $method, my $fn, my $arg, my $state) = @_;
-  my $str = $method . "::advance";
-  no strict "refs";
-  return &${str}($fn, $arg, $state);
+    (my $method,my $fn,my $arg,my $state) = @_;    
+    my $str = $method."::advance";
+    no strict "refs";
+    return &${str}($fn,$arg,$state);
 }
 
 sub call_transform ($$$$) {
-  (my $method, my $fn, my $arg, my $state) = @_;
-  my $str = $method . "::transform";
-  no strict "refs";
-  return &${str}($fn, $arg, $state);
+    (my $method,my $fn,my $arg,my $state) = @_;    
+    my $str = $method."::transform";
+    no strict "refs";
+    return &${str}($fn,$arg,$state);
 }
 
 # @variants is the list of variants that we're currently considering;
@@ -317,28 +268,27 @@ sub call_transform ($$$$) {
 # element is the pid of the child process (if running) or -1 (if we've
 # already waited for that child or there never was a child due to a
 # cache hit)
-my @variants    = ();
+my @variants = ();
 my $num_running = 0;
 
 sub killem() {
-  while (scalar(@variants) > 0) {
-    my $kidref = shift @variants;
-    die unless (scalar(@{$kidref}) == 5);
-    (my $pid, my $newsh, my $tmpdir, my $tmpfn, my $result) = @{$kidref};
-    if ($pid != -1) {
-
-      # kill the whole group
-      kill('TERM', -$pid);
-      waitpid($pid, 0);
-      $num_running--;
+    while (scalar(@variants) > 0) {
+	my $kidref = shift @variants;
+	die unless (scalar(@{$kidref})==5);
+	(my $pid, my $newsh, my $tmpdir, my $tmpfn, my $result) = @{$kidref};
+	if ($pid != -1) {
+	    # kill the whole group
+	    kill ('TERM', -$pid); 
+	    waitpid ($pid, 0);
+	    $num_running--;
+	}
+	File::Path::rmtree ($tmpdir, 0, 0);	
     }
-    File::Path::rmtree($tmpdir, 0, 0);
-  }
 }
 
 my $good_cnt;
 my $bad_cnt;
-my $pass_num      = 0;
+my $pass_num = 0;
 my %method_worked = ();
 my %method_failed = ();
 
@@ -347,682 +297,513 @@ my %method_failed = ();
 # the parallelization strategy is described here:
 #   http://blog.regehr.org/archives/749
 sub delta_pass ($) {
-  (my $mref) = @_;
-  my $delta_method = ${$mref}{"name"};
-  my $delta_arg    = ${$mref}{"arg"};
-  $good_cnt = 0;
-  $bad_cnt  = 0;
+    (my $mref) = @_;    
+    my $delta_method = ${$mref}{"name"};
+    my $delta_arg = ${$mref}{"arg"};
+    $good_cnt = 0;
+    $bad_cnt = 0;
 
-  die unless (scalar(@variants) == 0);
-  die unless ($num_running == 0);
+    die unless (scalar(@variants)==0);
+    die unless ($num_running==0);
 
-  print "\n" if $VERBOSE;
-  print "===< $delta_method :: $delta_arg >===\n";
+    print "\n" if $VERBOSE;
+    print "===< $delta_method :: $delta_arg >===\n";
 
-  my $orig_tmpfn = $toreduce;
-  File::Copy::copy($toreduce_best, $orig_tmpfn) or die;
-  my $state = call_new($delta_method, $orig_tmpfn, $delta_arg);
+    my $orig_tmpfn = $toreduce;
+    File::Copy::copy($toreduce_best,$orig_tmpfn) or die;
+    my $state = call_new ($delta_method,$orig_tmpfn,$delta_arg);
 
-  if ($SANITY) {
-    sanity_check();
-  }
-
-  my $since_success = 0;
-  my $stopped       = 0;
-AGAIN:
-
-  # create child processes until:
-  # 1. we've created enough
-  # 2. we get a STOP
-  # 3. we get a cache hit, in which case it's a better bet to just
-  #    look at the result instead of speculating more
-  while (!$stopped && $num_running < $NPROCS) {
-    my $tmpdir = make_tmpdir();
-    chdir $tmpdir or die;
-    my $tmpfn = File::Spec->rel2abs($orig_tmpfn);
-    File::Copy::copy($toreduce_best, $tmpfn) or die;
-
-    # creating the variant is done in the parent, it's only
-    # testing it that we parallelize
-    (my $delta_res, $state)
-      = call_transform($delta_method, $tmpfn, $delta_arg, $state);
-    die unless ($delta_res == $OK || $delta_res == $STOP);
-    if ($delta_res == $STOP) {
-      chdir $ORIG_DIR or die;
-      $stopped = 1;
+    if ($SANITY) {
+	sanity_check();
     }
-    else {
-      system "diff $toreduce_best $tmpfn" if ($PRINT_DIFF);
 
-# FIXME: check the cache here
-# FIXME: extend the plugin interface to optionally return a reference to the processed data
+    my $since_success = 0;
+    my $stopped = 0;
+  AGAIN:
+    
+    # create child processes until:
+    # 1. we've created enough 
+    # 2. we get a STOP
+    # 3. we get a cache hit, in which case it's a better bet to just
+    #    look at the result instead of speculating more
+    while (!$stopped && $num_running < $NPROCS) {
+	my $tmpdir = make_tmpdir();
+	chdir $tmpdir or die;
+	my $tmpfn = File::Spec->rel2abs($orig_tmpfn);
+	File::Copy::copy($toreduce_best,$tmpfn) or die;
+	# creating the variant is done in the parent, it's only
+	# testing it that we parallelize
+	(my $delta_res, $state) = call_transform ($delta_method,$tmpfn,$delta_arg,$state);
+	die unless ($delta_res == $OK || $delta_res == $STOP);
+	if ($delta_res == $STOP) {
+	    chdir $ORIG_DIR or die;
+	    $stopped = 1;
+	} else {
+	    system "diff $toreduce_best $tmpfn" if ($PRINT_DIFF);
 
-      my $pid = fork();
-      die unless ($pid >= 0);
-      my @l = ($pid, $state, $tmpdir, $tmpfn, -99);
-      $state = call_advance($delta_method, $tmpfn, $delta_arg, $state);
-      if ($FUZZ) {
-        while (rand() < 0.5) {
-          $state = call_advance($delta_method, $tmpfn, $delta_arg, $state);
-        }
-      }
-      push @variants, \@l;
-      my $delta_result;
-      print
-        "[${pass_num} ${delta_method} :: ${delta_arg} s:$good_cnt f:$bad_cnt] "
-        if $VERBOSE;
-      if ($pid == 0) {
+	    # FIXME: check the cache here
+	    # FIXME: extend the plugin interface to optionally return a reference to the processed data
 
-        # put this process (the child) into a process group
-        # named by its pid so that we'll be able to kill its
-        # entire subtree all at once later
-        setpgrp();
-        $delta_result = delta_test($delta_method, $delta_arg, $state, $tmpfn);
-        exit($delta_result);
-      }
-      chdir $ORIG_DIR or die;
-      $num_running++;
-      print "forked $pid, num_running = ${num_running}\n" if $DEBUG_SMP;
+	    my $pid = fork();
+	    die unless ($pid >= 0);
+	    my @l = ($pid, $state, $tmpdir, $tmpfn, -99);	    
+	    $state = call_advance ($delta_method,$tmpfn,$delta_arg,$state);
+	    if ($FUZZ) {
+		while (rand()<0.5) {
+		    $state = call_advance ($delta_method,$tmpfn,$delta_arg,$state);
+		}
+	    }
+	    push @variants, \@l;
+	    my $delta_result;
+	    print "[${pass_num} ${delta_method} :: ${delta_arg} s:$good_cnt f:$bad_cnt] " if $VERBOSE;
+	    if ($pid==0) {
+		# put this process (the child) into a process group
+		# named by its pid so that we'll be able to kill its
+		# entire subtree all at once later
+		setpgrp();
+		$delta_result = delta_test ($delta_method,$delta_arg,$state,$tmpfn);		
+		exit ($delta_result);
+	    }
+	    chdir $ORIG_DIR or die;
+	    $num_running++;
+	    print "forked $pid, num_running = ${num_running}\n" if $DEBUG_SMP;
+	}
     }
-  }
 
-  # starting at the front of the list, peel off all variants that
-  # aren't backed up by a running subprocess; this might be because
-  # there was a cache hit, or it might be because a subprocess has
-  # already terminated
-  while (scalar(@variants) > 0) {
-    my $kidref = $variants[0];
-    (my $pid, my $newsh, my $tmpdir, my $tmpfn, my $delta_result) = @{$kidref};
-    last if ($pid != -1);
-    my $trash = shift @variants;
-
-    # ok, now we have a result to work with
-    if ($delta_result) {
-
-      # now that the delta test succeeded, this becomes our new
-      # best version--this has to be done in the parent process
-      killem();
-      $good_cnt++;
-      $since_success = 0;
-      $method_worked{$delta_method}{$delta_arg}++;
-      $state   = $newsh;
-      $stopped = 0;
-      File::Copy::copy($tmpfn, $toreduce_best) or die;
-      print "success " if $VERBOSE;
-      print_pct(-s $toreduce_best);
+    # starting at the front of the list, peel off all variants that
+    # aren't backed up by a running subprocess; this might be because
+    # there was a cache hit, or it might be because a subprocess has
+    # already terminated
+    while (scalar (@variants) > 0) {
+	my $kidref = $variants[0];
+	(my $pid,my $newsh,my $tmpdir,my $tmpfn,my $delta_result) = @{$kidref};
+	last if ($pid != -1);
+	my $trash = shift @variants;
+	# ok, now we have a result to work with
+	if ($delta_result) { 
+	    # now that the delta test succeeded, this becomes our new
+	    # best version--this has to be done in the parent process
+	    killem ();
+	    $good_cnt++;
+	    $since_success = 0;
+	    $method_worked{$delta_method}{$delta_arg}++;
+	    $state = $newsh;
+	    $stopped = 0;
+	    File::Copy::copy($tmpfn,$toreduce_best) or die;
+	    print "success " if $VERBOSE;
+	    print_pct(-s $toreduce_best);
+	} else {
+	    print "failure\n" if $VERBOSE;
+	    $bad_cnt++;
+	    $since_success++;
+	    $method_failed{$delta_method}{$delta_arg}++;
+	}
+	File::Path::rmtree ($tmpdir, 0, 0);	
     }
-    else {
-      print "failure\n" if $VERBOSE;
-      $bad_cnt++;
-      $since_success++;
-      $method_failed{$delta_method}{$delta_arg}++;
+
+    if ($num_running>0) {	
+	print "about to wait\n" if $DEBUG_SMP;
+	my $xpid = wait();
+	die if ($xpid==-1);
+	my $ret = $?;
+	my $delta_result = $ret >> 8;	    
+	print "child $xpid returned ${delta_result}\n" if $DEBUG_SMP;
+	$num_running--;
+	my $found = 0;
+	for (my $i=0; $i<scalar(@variants); $i++) {
+	    my $kidref = $variants[$i];
+	    die unless (scalar(@{$kidref})==5);
+	    (my $pid,my $newsh,my $tmpdir,my $tmpfn,my $res) = @{$kidref};
+	    if ($xpid==$pid) {
+		$found = 1;
+		my @l = (-1,$newsh,$tmpdir,$tmpfn,$delta_result);
+		splice (@variants, $i, 1, \@l);
+		last;
+	    }
+	}
+	die unless $found;
     }
-    File::Path::rmtree($tmpdir, 0, 0);
-  }
 
-  if ($num_running > 0) {
-    print "about to wait\n" if $DEBUG_SMP;
-    my $xpid = wait();
-    die if ($xpid == -1);
-    my $ret          = $?;
-    my $delta_result = $ret >> 8;
-    print "child $xpid returned ${delta_result}\n" if $DEBUG_SMP;
-    $num_running--;
-    my $found = 0;
-
-    for (my $i = 0; $i < scalar(@variants); $i++) {
-      my $kidref = $variants[$i];
-      die unless (scalar(@{$kidref}) == 5);
-      (my $pid, my $newsh, my $tmpdir, my $tmpfn, my $res) = @{$kidref};
-      if ($xpid == $pid) {
-        $found = 1;
-        my @l = (-1, $newsh, $tmpdir, $tmpfn, $delta_result);
-        splice(@variants, $i, 1, \@l);
-        last;
-      }
+    # nasty heuristic for avoiding getting stuck by buggy passes that
+    # keep reporting success w/o making progress
+    if ($GIVEUP_CONSTANT != 0 && ($since_success > $GIVEUP_CONSTANT)) {
+	killem();
+	remove_tmpdirs();
+	return;
     }
-    die unless $found;
-  }
 
-  # nasty heuristic for avoiding getting stuck by buggy passes that
-  # keep reporting success w/o making progress
-  if ($GIVEUP_CONSTANT != 0 && ($since_success > $GIVEUP_CONSTANT)) {
-    killem();
-    remove_tmpdirs();
-    return;
-  }
+    # termination condition for this pass
+    if ($stopped && scalar(@variants)==0) {
+	remove_tmpdirs();
+	return;
+    }
 
-  # termination condition for this pass
-  if ($stopped && scalar(@variants) == 0) {
-    remove_tmpdirs();
-    return;
-  }
-
-  goto AGAIN;
+    goto AGAIN;
 }
 
 my @all_methods = (
-  {"name" => "pass_blank", "arg" => "0", "first_pass_pri" => 1,},
+    { "name" => "pass_blank",    "arg" => "0",                                     "first_pass_pri" =>   1, },
 
-  {
-    "name"           => "pass_lines",
-    "arg"            => "0",
-    "pri"            => 410,
-    "first_pass_pri" => 20,
-    "last_pass_pri"  => 999,
-  },
-  {"name" => "pass_lines", "arg" => "0", "first_pass_pri" => 21,},
-  {"name" => "pass_lines", "arg" => "0", "first_pass_pri" => 22,},
-  {
-    "name"           => "pass_lines",
-    "arg"            => "1",
-    "pri"            => 411,
-    "first_pass_pri" => 23,
-  },
-  {"name" => "pass_lines", "arg" => "1", "first_pass_pri" => 24,},
-  {"name" => "pass_lines", "arg" => "1", "first_pass_pri" => 25,},
-  {
-    "name"           => "pass_lines",
-    "arg"            => "2",
-    "pri"            => 412,
-    "first_pass_pri" => 27,
-  },
-  {"name" => "pass_lines", "arg" => "2", "first_pass_pri" => 28,},
-  {"name" => "pass_lines", "arg" => "2", "first_pass_pri" => 29,},
-  {
-    "name"           => "pass_lines",
-    "arg"            => "10",
-    "pri"            => 413,
-    "first_pass_pri" => 30,
-  },
-  {"name" => "pass_lines", "arg" => "10", "first_pass_pri" => 31,},
-  {"name" => "pass_lines", "arg" => "10", "first_pass_pri" => 32,},
+    { "name" => "pass_lines",    "arg" => "0",                      "pri" => 410,  "first_pass_pri" =>  20,   "last_pass_pri" => 999, },
+    { "name" => "pass_lines",    "arg" => "0",                                     "first_pass_pri" =>  21, },
+    { "name" => "pass_lines",    "arg" => "0",                                     "first_pass_pri" =>  22, },
+    { "name" => "pass_lines",    "arg" => "1",                      "pri" => 411,  "first_pass_pri" =>  23, },
+    { "name" => "pass_lines",    "arg" => "1",                                     "first_pass_pri" =>  24, },
+    { "name" => "pass_lines",    "arg" => "1",                                     "first_pass_pri" =>  25, },
+    { "name" => "pass_lines",    "arg" => "2",                      "pri" => 412,  "first_pass_pri" =>  27, },
+    { "name" => "pass_lines",    "arg" => "2",                                     "first_pass_pri" =>  28, },
+    { "name" => "pass_lines",    "arg" => "2",                                     "first_pass_pri" =>  29, },
+    { "name" => "pass_lines",    "arg" => "10",                     "pri" => 413,  "first_pass_pri" =>  30, },
+    { "name" => "pass_lines",    "arg" => "10",                                    "first_pass_pri" =>  31, },
+    { "name" => "pass_lines",    "arg" => "10",                                    "first_pass_pri" =>  32, },
 
-  {"name" => "pass_special", "arg" => "a", "first_pass_pri" => 110,},
-  {
-    "name"           => "pass_special",
-    "arg"            => "b",
-    "pri"            => 555,
-    "first_pass_pri" => 110,
-  },
-  {
-    "name"           => "pass_special",
-    "arg"            => "c",
-    "pri"            => 555,
-    "first_pass_pri" => 110,
-  },
-  {"name" => "pass_ternary", "arg" => "b", "pri" => 104,},
-  {"name" => "pass_ternary", "arg" => "c", "pri" => 105,},
-  {
-    "name"           => "pass_balanced",
-    "arg"            => "curly",
-    "pri"            => 110,
-    "first_pass_pri" => 35,
-  },
-  {
-    "name"           => "pass_balanced",
-    "arg"            => "curly2",
-    "pri"            => 111,
-    "first_pass_pri" => 36,
-  },
-  {
-    "name"           => "pass_balanced",
-    "arg"            => "curly3",
-    "pri"            => 112,
-    "first_pass_pri" => 37,
-  },
-  {"name" => "pass_balanced", "arg" => "parens",              "pri" => 113,},
-  {"name" => "pass_balanced", "arg" => "angles",              "pri" => 114,},
-  {"name" => "pass_balanced", "arg" => "curly-only",          "pri" => 150,},
-  {"name" => "pass_balanced", "arg" => "parens-only",         "pri" => 151,},
-  {"name" => "pass_balanced", "arg" => "angles-only",         "pri" => 152,},
-  {"name" => "pass_clang",    "arg" => "remove-namespace",    "pri" => 200,},
-  {"name" => "pass_clang",    "arg" => "aggregate-to-scalar", "pri" => 201,},
-
-#{ "name" => "pass_clang",    "arg" => "binop-simplification",   "pri" => 201,  },
-  {"name" => "pass_clang", "arg" => "local-to-global",        "pri" => 202,},
-  {"name" => "pass_clang", "arg" => "param-to-global",        "pri" => 203,},
-  {"name" => "pass_clang", "arg" => "param-to-local",         "pri" => 204,},
-  {"name" => "pass_clang", "arg" => "remove-nested-function", "pri" => 205,},
-  {"name" => "pass_clang", "arg" => "rename-fun", "last_pass_pri" => 207,},
-  {"name" => "pass_clang", "arg" => "union-to-struct", "pri" => 208,},
-  {"name" => "pass_clang", "arg" => "rename-param", "last_pass_pri" => 209,},
-  {"name" => "pass_clang", "arg" => "rename-var",   "last_pass_pri" => 210,},
-  {"name" => "pass_clang", "arg" => "rename-class", "last_pass_pri" => 211,},
-  {
-    "name"          => "pass_clang",
-    "arg"           => "rename-cxx-method",
-    "last_pass_pri" => 212,
-  },
-  {"name" => "pass_clang", "arg" => "return-void",          "pri" => 212,},
-  {"name" => "pass_clang", "arg" => "simple-inliner",       "pri" => 213,},
-  {"name" => "pass_clang", "arg" => "reduce-pointer-level", "pri" => 214,},
-  {"name" => "pass_clang", "arg" => "lift-assignment-expr", "pri" => 215,},
-  {"name" => "pass_clang", "arg" => "copy-propagation",     "pri" => 216,},
-  {
-    "name"           => "pass_clang",
-    "arg"            => "callexpr-to-value",
-    "pri"            => 217,
-    "first_pass_pri" => 49,
-  },
-  {
-    "name"           => "pass_clang",
-    "arg"            => "replace-callexpr",
-    "pri"            => 218,
-    "first_pass_pri" => 50,
-  },
-  {
-    "name"           => "pass_clang",
-    "arg"            => "simplify-callexpr",
-    "pri"            => 219,
-    "first_pass_pri" => 51,
-  },
-  {
-    "name"           => "pass_clang",
-    "arg"            => "remove-unused-function",
-    "pri"            => 220,
-    "first_pass_pri" => 33,
-  },
-  {
-    "name"           => "pass_clang",
-    "arg"            => "remove-unused-enum-member",
-    "pri"            => 221,
-    "first_pass_pri" => 51,
-  },
-  {
-    "name"           => "pass_clang",
-    "arg"            => "remove-enum-member-value",
-    "pri"            => 222,
-    "first_pass_pri" => 52,
-  },
-  {
-    "name"           => "pass_clang",
-    "arg"            => "remove-unused-var",
-    "pri"            => 223,
-    "first_pass_pri" => 53,
-  },
-  {"name" => "pass_clang", "arg" => "simplify-if",         "pri" => 224,},
-  {"name" => "pass_clang", "arg" => "reduce-array-dim",    "pri" => 225,},
-  {"name" => "pass_clang", "arg" => "reduce-array-size",   "pri" => 226,},
-  {"name" => "pass_clang", "arg" => "move-function-body",  "pri" => 227,},
-  {"name" => "pass_clang", "arg" => "simplify-comma-expr", "pri" => 228,},
-  {
-    "name" => "pass_clang",
-    "arg"  => "simplify-dependent-typedef",
-    "pri"  => 229,
-  },
-  {"name" => "pass_clang", "arg" => "replace-simple-typedef", "pri" => 230,},
-  {
-    "name" => "pass_clang",
-    "arg"  => "replace-dependent-typedef",
-    "pri"  => 231,
-  },
-  {
-    "name" => "pass_clang",
-    "arg"  => "replace-one-level-typedef-type",
-    "pri"  => 232,
-  },
-  {"name" => "pass_clang", "arg" => "remove-unused-field", "pri" => 233,},
-  {
-    "name" => "pass_clang",
-    "arg"  => "instantiate-template-type-param-to-int",
-    "pri"  => 234,
-  },
-  {
-    "name" => "pass_clang",
-    "arg"  => "instantiate-template-param",
-    "pri"  => 235,
-  },
-  {"name" => "pass_clang", "arg" => "template-arg-to-int", "pri" => 236,},
-  {
-    "name" => "pass_clang",
-    "arg"  => "template-non-type-arg-to-int",
-    "pri"  => 237,
-  },
-  {
-    "name" => "pass_clang",
-    "arg"  => "reduce-class-template-param",
-    "pri"  => 238,
-  },
-  {
-    "name" => "pass_clang",
-    "arg"  => "remove-trivial-base-template",
-    "pri"  => 239,
-  },
-  {"name" => "pass_clang", "arg" => "class-template-to-class", "pri" => 240,},
-  {"name" => "pass_clang", "arg" => "remove-base-class",       "pri" => 241,},
-  {"name" => "pass_clang", "arg" => "replace-derived-class",   "pri" => 242,},
-  {"name" => "pass_clang", "arg" => "remove-unresolved-base",  "pri" => 243,},
-  {"name" => "pass_clang", "arg" => "remove-ctor-initializer", "pri" => 244,},
-  {
-    "name" => "pass_clang",
-    "arg"  => "replace-class-with-base-template-spec",
-    "pri"  => 245,
-  },
-  {"name" => "pass_clang", "arg" => "simplify-nested-class", "pri" => 246,},
-  {
-    "name" => "pass_clang",
-    "arg"  => "remove-unused-outer-class",
-    "pri"  => 247,
-  },
-  {"name" => "pass_clang", "arg" => "empty-struct-to-int",  "pri" => 248,},
-  {"name" => "pass_clang", "arg" => "remove-pointer",       "pri" => 249,},
-  {"name" => "pass_clang", "arg" => "remove-pointer-pairs", "pri" => 250,},
-  {"name" => "pass_clang", "arg" => "remove-array",         "pri" => 251,},
-  {"name" => "pass_clang", "arg" => "remove-addr-taken",    "pri" => 252,},
-  {"name" => "pass_clang", "arg" => "simplify-struct",      "pri" => 253,},
-  {
-    "name" => "pass_clang",
-    "arg"  => "replace-undefined-function",
-    "pri"  => 254,
-  },
-  {"name" => "pass_clang", "arg" => "replace-array-index-var", "pri" => 255,},
-  {"name" => "pass_clang", "arg" => "replace-dependent-name",  "pri" => 256,},
-  {
-    "name" => "pass_clang",
-    "arg"  => "simplify-recursive-template-instantiation",
-    "pri"  => 257,
-  },
-  {
-    "name"          => "pass_clang",
-    "arg"           => "combine-global-var",
-    "last_pass_pri" => 990,
-  },
-  {
-    "name"          => "pass_clang",
-    "arg"           => "combine-local-var",
-    "last_pass_pri" => 991,
-  },
-  {
-    "name"          => "pass_clang",
-    "arg"           => "simplify-struct-union-decl",
-    "last_pass_pri" => 992,
-  },
-  {
-    "name"          => "pass_clang",
-    "arg"           => "move-global-var",
-    "last_pass_pri" => 993,
-  },
-  {
-    "name"          => "pass_clang",
-    "arg"           => "unify-function-decl",
-    "last_pass_pri" => 994,
-  },
-  {"name" => "pass_peep",   "arg" => "a",       "pri" => 500,},
-  {"name" => "pass_peep",   "arg" => "b",       "pri" => 501,},
-  {"name" => "pass_ints",   "arg" => "a",       "pri" => 600,},
-  {"name" => "pass_ints",   "arg" => "b",       "pri" => 601,},
-  {"name" => "pass_ints",   "arg" => "c",       "pri" => 602,},
-  {"name" => "pass_ints",   "arg" => "d",       "pri" => 603,},
-  {"name" => "pass_ints",   "arg" => "e",       "pri" => 603,},
-  {"name" => "pass_indent", "arg" => "regular", "pri" => 1000,},
-  {"name" => "pass_clex", "arg" => "delete-string", "last_pass_pri" => 1001,},
-  {"name" => "pass_indent", "arg" => "final", "last_pass_pri" => 9999,},
-);
+    { "name" => "pass_special",      "arg" => "a",                                 "first_pass_pri" => 110, },
+    { "name" => "pass_special",      "arg" => "b",                  "pri" => 555,  "first_pass_pri" => 110, },
+    { "name" => "pass_special",      "arg" => "c",                  "pri" => 555,  "first_pass_pri" => 110, },
+    { "name" => "pass_ternary",  "arg" => "b",                      "pri" => 104,  },
+    { "name" => "pass_ternary",  "arg" => "c",                      "pri" => 105,  },
+    { "name" => "pass_balanced", "arg" => "curly",                  "pri" => 110,  "first_pass_pri" =>  35, },
+    { "name" => "pass_balanced", "arg" => "curly2",                 "pri" => 111,  "first_pass_pri" =>  36, },
+    { "name" => "pass_balanced", "arg" => "curly3",                 "pri" => 112,  "first_pass_pri" =>  37, },
+    { "name" => "pass_balanced", "arg" => "parens",                 "pri" => 113,  },
+    { "name" => "pass_balanced", "arg" => "angles",                 "pri" => 114,  },
+    { "name" => "pass_balanced", "arg" => "curly-only",             "pri" => 150,  },
+    { "name" => "pass_balanced", "arg" => "parens-only",            "pri" => 151,  },
+    { "name" => "pass_balanced", "arg" => "angles-only",            "pri" => 152,  },
+    { "name" => "pass_clang",    "arg" => "remove-namespace",       "pri" => 200,  },
+    { "name" => "pass_clang",    "arg" => "aggregate-to-scalar",    "pri" => 201,  },
+   #{ "name" => "pass_clang",    "arg" => "binop-simplification",   "pri" => 201,  },
+    { "name" => "pass_clang",    "arg" => "local-to-global",        "pri" => 202,  },
+    { "name" => "pass_clang",    "arg" => "param-to-global",        "pri" => 203,  },
+    { "name" => "pass_clang",    "arg" => "param-to-local",         "pri" => 204,  },
+    { "name" => "pass_clang",    "arg" => "remove-nested-function", "pri" => 205,  },
+    { "name" => "pass_clang",    "arg" => "rename-fun",                            "last_pass_pri" => 207,  },
+    { "name" => "pass_clang",    "arg" => "union-to-struct",        "pri" => 208,  },
+    { "name" => "pass_clang",    "arg" => "rename-param",                          "last_pass_pri" => 209,  },
+    { "name" => "pass_clang",    "arg" => "rename-var",                            "last_pass_pri" => 210,  },
+    { "name" => "pass_clang",    "arg" => "rename-class",                          "last_pass_pri" => 211,  },
+    { "name" => "pass_clang",    "arg" => "rename-cxx-method",                     "last_pass_pri" => 212,  },
+    { "name" => "pass_clang",    "arg" => "return-void",            "pri" => 212,  },
+    { "name" => "pass_clang",    "arg" => "simple-inliner",         "pri" => 213,  },
+    { "name" => "pass_clang",    "arg" => "reduce-pointer-level",   "pri" => 214,  },
+    { "name" => "pass_clang",    "arg" => "lift-assignment-expr",   "pri" => 215,  },
+    { "name" => "pass_clang",    "arg" => "copy-propagation",       "pri" => 216,  },
+    { "name" => "pass_clang",    "arg" => "callexpr-to-value",      "pri" => 217,  "first_pass_pri" => 49, },
+    { "name" => "pass_clang",    "arg" => "replace-callexpr",       "pri" => 218,  "first_pass_pri" => 50, },
+    { "name" => "pass_clang",    "arg" => "simplify-callexpr",      "pri" => 219,  "first_pass_pri" => 51, },
+    { "name" => "pass_clang",    "arg" => "remove-unused-function", "pri" => 220,  "first_pass_pri" => 33, },
+    { "name" => "pass_clang",    "arg" => "remove-unused-enum-member", "pri" => 221, "first_pass_pri" => 51, },
+    { "name" => "pass_clang",    "arg" => "remove-enum-member-value", "pri" => 222, "first_pass_pri" => 52, },
+    { "name" => "pass_clang",    "arg" => "remove-unused-var",      "pri" => 223,  "first_pass_pri" => 53, },
+    { "name" => "pass_clang",    "arg" => "simplify-if",            "pri" => 224,  },
+    { "name" => "pass_clang",    "arg" => "reduce-array-dim",       "pri" => 225,  },
+    { "name" => "pass_clang",    "arg" => "reduce-array-size",      "pri" => 226,  },
+    { "name" => "pass_clang",    "arg" => "move-function-body",     "pri" => 227,  },
+    { "name" => "pass_clang",    "arg" => "simplify-comma-expr",    "pri" => 228,  },
+    { "name" => "pass_clang",    "arg" => "simplify-dependent-typedef",   "pri" => 229,  },
+    { "name" => "pass_clang",    "arg" => "replace-simple-typedef", "pri" => 230,  },
+    { "name" => "pass_clang",    "arg" => "replace-dependent-typedef",     "pri" => 231,  },
+    { "name" => "pass_clang",    "arg" => "replace-one-level-typedef-type",     "pri" => 232,  },
+    { "name" => "pass_clang",    "arg" => "remove-unused-field",    "pri" => 233,  },
+    { "name" => "pass_clang",    "arg" => "instantiate-template-type-param-to-int",  "pri" => 234,  },
+    { "name" => "pass_clang",    "arg" => "instantiate-template-param",    "pri" => 235,  },
+    { "name" => "pass_clang",    "arg" => "template-arg-to-int",    "pri" => 236,  },
+    { "name" => "pass_clang",    "arg" => "template-non-type-arg-to-int", "pri" => 237,  },
+    { "name" => "pass_clang",    "arg" => "reduce-class-template-param",  "pri" => 238,  },
+    { "name" => "pass_clang",    "arg" => "remove-trivial-base-template", "pri" => 239,  },
+    { "name" => "pass_clang",    "arg" => "class-template-to-class",      "pri" => 240,  },
+    { "name" => "pass_clang",    "arg" => "remove-base-class",      "pri" => 241,  },
+    { "name" => "pass_clang",    "arg" => "replace-derived-class",  "pri" => 242,  },
+    { "name" => "pass_clang",    "arg" => "remove-unresolved-base", "pri" => 243,  },
+    { "name" => "pass_clang",    "arg" => "remove-ctor-initializer","pri" => 244,  },
+    { "name" => "pass_clang",    "arg" => "replace-class-with-base-template-spec","pri" => 245,  },
+    { "name" => "pass_clang",    "arg" => "simplify-nested-class",  "pri" => 246,  },
+    { "name" => "pass_clang",    "arg" => "remove-unused-outer-class",    "pri" => 247,  },
+    { "name" => "pass_clang",    "arg" => "empty-struct-to-int",    "pri" => 248,  },
+    { "name" => "pass_clang",    "arg" => "remove-pointer",         "pri" => 249,  },
+    { "name" => "pass_clang",    "arg" => "remove-pointer-pairs",   "pri" => 250,  },
+    { "name" => "pass_clang",    "arg" => "remove-array",           "pri" => 251,  },
+    { "name" => "pass_clang",    "arg" => "remove-addr-taken",      "pri" => 252,  },
+    { "name" => "pass_clang",    "arg" => "simplify-struct",        "pri" => 253,  },
+    { "name" => "pass_clang",    "arg" => "replace-undefined-function",   "pri" => 254,  },
+    { "name" => "pass_clang",    "arg" => "replace-array-index-var",      "pri" => 255,  },
+    { "name" => "pass_clang",    "arg" => "replace-dependent-name", "pri" => 256,  },
+    { "name" => "pass_clang",    "arg" => "simplify-recursive-template-instantiation",       "pri" => 257, },
+    { "name" => "pass_clang",    "arg" => "combine-global-var",                    "last_pass_pri" => 990, },
+    { "name" => "pass_clang",    "arg" => "combine-local-var",                     "last_pass_pri" => 991, },
+    { "name" => "pass_clang",    "arg" => "simplify-struct-union-decl",            "last_pass_pri" => 992, },
+    { "name" => "pass_clang",    "arg" => "move-global-var",                       "last_pass_pri" => 993, },
+    { "name" => "pass_clang",    "arg" => "unify-function-decl",                   "last_pass_pri" => 994, },
+    { "name" => "pass_peep",     "arg" => "a",                      "pri" => 500,  },
+    { "name" => "pass_peep",     "arg" => "b",                      "pri" => 501,  },
+    { "name" => "pass_ints",     "arg" => "a",                      "pri" => 600,  },
+    { "name" => "pass_ints",     "arg" => "b",                      "pri" => 601,  },
+    { "name" => "pass_ints",     "arg" => "c",                      "pri" => 602,  },
+    { "name" => "pass_ints",     "arg" => "d",                      "pri" => 603,  },
+    { "name" => "pass_ints",     "arg" => "e",                      "pri" => 603,  },
+    { "name" => "pass_indent",   "arg" => "regular",                "pri" => 1000, },
+    { "name" => "pass_clex",     "arg" => "delete-string",                         "last_pass_pri" => 1001, },
+    { "name" => "pass_indent",   "arg" => "final",                                 "last_pass_pri" => 9999, },
+    );
 
 if ($SANITIZE) {
-  push @all_methods, (
-    {"name" => "pass_clex", "arg" => "rename-toks", "last_pass_pri" => 1000,},
-    {"name" => "pass_clex", "arg" => "delete-string",      "pri" => 1001,},
-    {"name" => "pass_clex", "arg" => "remove-asm-line",    "pri" => 1002,},
-    {"name" => "pass_clex", "arg" => "remove-asm-comment", "pri" => 1003,},
-    {"name" => "pass_clex", "arg" => "shorten-string",     "pri" => 1010,},
-    {"name" => "pass_clex", "arg" => "x-string",           "pri" => 1011,},
-
-# not helpful
-# { "name" => "pass_clex", "arg" => "collapse-toks",          "pri" => 5000, },
-  );
+    push @all_methods, (
+	{ "name" => "pass_clex", "arg" => "rename-toks",            "last_pass_pri" => 1000, },
+        { "name" => "pass_clex", "arg" => "delete-string",          "pri" => 1001, },
+        { "name" => "pass_clex", "arg" => "remove-asm-line",        "pri" => 1002, },
+        { "name" => "pass_clex", "arg" => "remove-asm-comment",     "pri" => 1003, },
+        { "name" => "pass_clex", "arg" => "shorten-string",         "pri" => 1010, },
+        { "name" => "pass_clex", "arg" => "x-string",               "pri" => 1011, },
+	# not helpful
+	# { "name" => "pass_clex", "arg" => "collapse-toks",          "pri" => 5000, },
+    );
 }
 
 if ($SLOW || $SLLOOWW) {
-  push @all_methods,
-    (
-    {"name" => "pass_clex", "arg" => "rm-toks-1",  "pri" => 9000,},
-    {"name" => "pass_clex", "arg" => "rm-toks-2",  "pri" => 9001,},
-    {"name" => "pass_clex", "arg" => "rm-toks-3",  "pri" => 9002,},
-    {"name" => "pass_clex", "arg" => "rm-toks-4",  "pri" => 9003,},
-    {"name" => "pass_clex", "arg" => "rm-toks-5",  "pri" => 9004,},
-    {"name" => "pass_clex", "arg" => "rm-toks-6",  "pri" => 9005,},
-    {"name" => "pass_clex", "arg" => "rm-toks-7",  "pri" => 9006,},
-    {"name" => "pass_clex", "arg" => "rm-toks-8",  "pri" => 9007,},
-    {"name" => "pass_clex", "arg" => "rm-toks-9",  "pri" => 9008,},
-    {"name" => "pass_clex", "arg" => "rm-toks-10", "pri" => 9009,},
-    {"name" => "pass_clex", "arg" => "rm-toks-11", "pri" => 9010,},
-    {"name" => "pass_clex", "arg" => "rm-toks-12", "pri" => 9011,},
-    {"name" => "pass_clex", "arg" => "rm-toks-13", "pri" => 9012,},
-    {"name" => "pass_clex", "arg" => "rm-toks-14", "pri" => 9013,},
-    {"name" => "pass_clex", "arg" => "rm-toks-15", "pri" => 9014,},
-    {"name" => "pass_clex", "arg" => "rm-toks-16", "pri" => 9015,},
+    push @all_methods, (
+	{ "name" => "pass_clex", "arg" => "rm-toks-1",              "pri" => 9000, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-2",              "pri" => 9001, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-3",              "pri" => 9002, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-4",              "pri" => 9003, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-5",              "pri" => 9004, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-6",              "pri" => 9005, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-7",              "pri" => 9006, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-8",              "pri" => 9007, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-9",              "pri" => 9008, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-10",             "pri" => 9009, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-11",             "pri" => 9010, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-12",             "pri" => 9011, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-13",             "pri" => 9012, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-14",             "pri" => 9013, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-15",             "pri" => 9014, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-16",             "pri" => 9015, },
     );
 }
 
 if ($SLOW && !$SLLOOWW) {
-  push @all_methods,
-    ({"name" => "pass_clex", "arg" => "rm-tok-pattern-4", "pri" => 9100,},);
+    push @all_methods, (
+	{ "name" => "pass_clex", "arg" => "rm-tok-pattern-4",       "pri" => 9100, },
+    );
 }
 
 if ($SLLOOWW) {
-
-  # too slow for most purposes...
-  push @all_methods,
-    ({"name" => "pass_clex", "arg" => "rm-tok-pattern-8", "pri" => 9100,},);
-  push @all_methods,
-    (
-    {"name" => "pass_clex", "arg" => "rm-toks-17", "pri" => 9000,},
-    {"name" => "pass_clex", "arg" => "rm-toks-18", "pri" => 9001,},
-    {"name" => "pass_clex", "arg" => "rm-toks-19", "pri" => 9002,},
-    {"name" => "pass_clex", "arg" => "rm-toks-20", "pri" => 9003,},
-    {"name" => "pass_clex", "arg" => "rm-toks-21", "pri" => 9004,},
-    {"name" => "pass_clex", "arg" => "rm-toks-22", "pri" => 9005,},
-    {"name" => "pass_clex", "arg" => "rm-toks-23", "pri" => 9006,},
-    {"name" => "pass_clex", "arg" => "rm-toks-24", "pri" => 9007,},
-    {"name" => "pass_clex", "arg" => "rm-toks-25", "pri" => 9008,},
-    {"name" => "pass_clex", "arg" => "rm-toks-26", "pri" => 9009,},
-    {"name" => "pass_clex", "arg" => "rm-toks-27", "pri" => 9010,},
-    {"name" => "pass_clex", "arg" => "rm-toks-28", "pri" => 9011,},
-    {"name" => "pass_clex", "arg" => "rm-toks-28", "pri" => 9012,},
-    {"name" => "pass_clex", "arg" => "rm-toks-30", "pri" => 9013,},
-    {"name" => "pass_clex", "arg" => "rm-toks-30", "pri" => 9014,},
-    {"name" => "pass_clex", "arg" => "rm-toks-32", "pri" => 9015,},
+    # too slow for most purposes...
+    push @all_methods, (
+	{ "name" => "pass_clex", "arg" => "rm-tok-pattern-8",       "pri" => 9100, },
+    );
+    push @all_methods, (
+	{ "name" => "pass_clex", "arg" => "rm-toks-17",             "pri" => 9000, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-18",             "pri" => 9001, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-19",             "pri" => 9002, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-20",             "pri" => 9003, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-21",             "pri" => 9004, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-22",             "pri" => 9005, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-23",             "pri" => 9006, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-24",             "pri" => 9007, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-25",             "pri" => 9008, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-26",             "pri" => 9009, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-27",             "pri" => 9010, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-28",             "pri" => 9011, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-28",             "pri" => 9012, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-30",             "pri" => 9013, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-30",             "pri" => 9014, },
+	{ "name" => "pass_clex", "arg" => "rm-toks-32",             "pri" => 9015, },
     );
 }
 
 if ($NODEFAULT) {
-  @all_methods = ();
+    @all_methods = ();
 }
 
 foreach my $r (@custom_methods) {
-  push @all_methods, $r;
+    push @all_methods, $r;
 }
 
 my $which;
-
 sub bypri {
-  my %aa = %{$a};
-  my %bb = %{$b};
-  return $aa{$which} <=> $bb{$which};
+    my %aa = %{$a};
+    my %bb = %{$b};
+    return $aa{$which} <=> $bb{$which};
 }
-
 sub pass_iterator ($) {
-  ($which) = @_;
-  my @l = ();
-  foreach my $href (@all_methods) {
-    my %pass = %{$href};
-    if (defined $pass{$which}) {
-      push @l, $href;
+    ($which) = @_;
+    my @l = ();
+    foreach my $href (@all_methods) {
+	my %pass = %{$href};
+	if (defined $pass{$which}) {
+	    push @l, $href;
+	}
     }
-  }
-  my @sorted_list = sort bypri @l;
-  return sub {
-    return (shift @sorted_list);
+    my @sorted_list = sort bypri @l;
+    return sub { 
+	return (shift @sorted_list);
     }
 }
 
 my %file_attr_to_error = (
-  e => "not found",
-  f => "is not a plain file",
-  r => "is not readable",
-  w => "is not writable",
-  x => "is not executable",
+    e => "not found",
+    f => "is not a plain file",
+    r => "is not readable",
+    w => "is not writable",
+    x => "is not executable",
 );
 
 sub check_file_attributes($$$) {
-  my ($prefix, $file, $attrs) = @_;
-  for my $attr (split //, $attrs) {
-    if (eval '! -' . $attr . ' $file') {
-      print "$prefix '$file' $file_attr_to_error{$attr}\n";
-      usage();
+    my ($prefix, $file, $attrs) = @_;
+    for my $attr (split //, $attrs) {
+        if (eval '! -' . $attr . ' $file') {
+            print "$prefix '$file' $file_attr_to_error{$attr}\n";
+            usage();
+        }
     }
-  }
 }
 
 ############################### main #################################
 sub main {
-  ($test, $toreduce) = @_;
+($test,$toreduce) = @_;
 
-  print "begin reduce: $test $toreduce\n";
-  my $timer = Benchmark::Timer->new();
-  $timer->start();
+print "begin reduce: $test $toreduce\n";
+my $timer = Benchmark::Timer->new();
+$timer->start();
 
-  my %prereqs_checked;
-  foreach my $mref (@all_methods) {
+my %prereqs_checked;
+foreach my $mref (@all_methods) {
     my %method = %{$mref};
-    my $mname  = $method{"name"};
-    die unless defined($mname);
-    next if defined($prereqs_checked{$mname});
+    my $mname = $method{"name"};
+    die unless defined ($mname);
+    next if defined ($prereqs_checked{$mname});
     $prereqs_checked{$mname} = 1;
     eval "require $mname";
     call_prereq_check($mname);
-  }
-  print "\n" if $VERBOSE;
+}
+print "\n" if $VERBOSE;
 
-  $test = File::Spec->rel2abs($test);
-  usage() unless defined($test);
-  check_file_attributes("test script", $test, "efrx");
+$test = File::Spec->rel2abs($test);
+usage() unless defined($test);
+check_file_attributes("test script", $test, "efrx");
 
-  usage() unless defined($toreduce);
-  check_file_attributes("file", $toreduce, "efrw");
+usage() unless defined($toreduce);
+check_file_attributes("file", $toreduce, "efrw");
 
-  print "===< $$ >===\n";
-  print "running $NPROCS interestingness test(s) in parallel\n";
+print "===< $$ >===\n";
+print "running $NPROCS interestingness test(s) in parallel\n";
 
 # Put scratch files ($toreduce_best, $toreduce_orig) in the current
 # working directory.
-  ($toreduce_base, $dir_base, $suffix) = fileparse($toreduce, '\.[^.]*');
+($toreduce_base, $dir_base, $suffix) = fileparse($toreduce, '\.[^.]*');
 
-  $ORIG_DIR = getcwd();
+$ORIG_DIR = getcwd();
 
 # absolute path so we can refer to this file from temporary working
 # dirs
 #
 # Note: On Cygwin, Cwd::abs_path() doesn't work for nonexistent files.  Bah.
 #
-  $toreduce_best = File::Spec->rel2abs("$toreduce_base.best");
-  $toreduce_orig = "$toreduce_base.orig";
+$toreduce_best  = File::Spec->rel2abs("$toreduce_base.best");
+$toreduce_orig = "$toreduce_base.orig";
 
-  File::Copy::copy($toreduce, $toreduce_orig) or die;
-  File::Copy::copy($toreduce, $toreduce_best) or die;
+File::Copy::copy($toreduce,$toreduce_orig) or die;
+File::Copy::copy($toreduce,$toreduce_best) or die;
 
-  my $file_size = -s $toreduce;
-  $orig_file_size = $file_size;
+my $file_size = -s $toreduce;
+$orig_file_size = $file_size;
 
 # unconditionally do this just once since otherwise output is
 # confusing when the initial test fails
-  sanity_check();
+sanity_check();
 
 # some passes we run first since they often make good headway quickliy
-  if (not $SKIP_FIRST) {
+if (not $SKIP_FIRST) {
     print "INITIAL PASSES\n" if $VERBOSE;
     my $next = pass_iterator("first_pass_pri");
     while (my $item = $next->()) {
-      delta_pass($item);
+        delta_pass ($item);
     }
-  }
+}
 
 # iterate to global fixpoint
-  print "MAIN PASSES\n" if $VERBOSE;
-  $file_size = -s $toreduce;
+print "MAIN PASSES\n" if $VERBOSE;
+$file_size = -s $toreduce;
 
-  while (1) {
+while (1) {
     my $next = pass_iterator("pri");
     while (my $item = $next->()) {
-      delta_pass($item);
+	delta_pass ($item);
     }
     $pass_num++;
     my $s = -s $toreduce_best;
     print "Termination check: size was $file_size; now $s\n";
     last if ($s >= $file_size);
     $file_size = $s;
-  }
-
-# some passes we run last since they work best as cleanup
-  print "CLEANUP PASS\n" if $VERBOSE;
-  {
-    my $next = pass_iterator("last_pass_pri");
-    while (my $item = $next->()) {
-      delta_pass($item);
-    }
-  }
-
-  print "===================== done ====================\n";
-
-  sub byname {
-    if (${$a}{"name"} eq ${$b}{"name"}) {
-      return ${$a}{"arg"} cmp ${$b}{"arg"};
-    }
-    else {
-      return ${$a}{"name"} cmp ${$b}{"name"};
-    }
-  }
-
-  print "\n";
-  print "pass statistics:\n";
-  foreach my $mref (sort byname @all_methods) {
-    my $method = ${$mref}{"name"};
-    my $arg    = ${$mref}{"arg"};
-    my $w      = $method_worked{$method}{$arg};
-    $w = 0 unless defined($w);
-    my $f = $method_failed{$method}{$arg};
-    $f = 0 unless defined($f);
-    print "  method $method :: $arg worked $w times and failed $f times\n";
-  }
-
-  print "\n";
-
-# this should be the only time we touch the original file
-  File::Copy::copy($toreduce_best, $toreduce) or die;
-
-  print "reduced test case:\n\n";
-  open INF, "<$toreduce" or die;
-  while (<INF>) {
-    print;
-  }
-  close INF;
-  print "\n";
-
-  $timer->stop();
-  my $time = int($timer->result());
-  print "elapsed time: $time seconds\n";
 }
 
-if ($SCAN_DIR) {
+# some passes we run last since they work best as cleanup
+print "CLEANUP PASS\n" if $VERBOSE;
+{
+    my $next = pass_iterator("last_pass_pri");
+    while (my $item = $next->()) {
+	delta_pass ($item);
+    }
+}
+
+print "===================== done ====================\n";
+
+sub byname {
+    if (${$a}{"name"} eq ${$b}{"name"}) {
+	return ${$a}{"arg"} cmp ${$b}{"arg"};
+    } else {
+	return ${$a}{"name"} cmp ${$b}{"name"};
+    }
+}
+
+print "\n";
+print "pass statistics:\n";
+foreach my $mref (sort byname @all_methods) {
+    my $method = ${$mref}{"name"};
+    my $arg = ${$mref}{"arg"};
+    my $w = $method_worked{$method}{$arg};
+    $w=0 unless defined($w);
+    my $f = $method_failed{$method}{$arg};
+    $f=0 unless defined($f);
+    print "  method $method :: $arg worked $w times and failed $f times\n";
+}
+
+print "\n";
+
+# this should be the only time we touch the original file
+File::Copy::copy($toreduce_best,$toreduce) or die;
+
+print "reduced test case:\n\n";
+open INF, "<$toreduce" or die;
+while (<INF>) {
+    print;
+}
+close INF;
+print "\n";
+
+$timer->stop();
+my $time = int($timer->result());
+print "elapsed time: $time seconds\n";
+}
+
+if($SCAN_DIR){
   die "$SCAN_DIR: $!" unless -e $SCAN_DIR;
   chdir $SCAN_DIR;
   my %file_list;
-  foreach my $sh_file (glob "*.sh") {
-    next unless -T $sh_file;
-    (my $c_file = $sh_file) =~ s/test(\d+)\.sh/"file" . $1 . ".c"/e;
-    next unless -e $c_file;
-    $file_list{$sh_file} = $c_file;
+  foreach my $sh_file(glob "*.sh"){
+     next unless -T $sh_file;
+     (my $c_file = $sh_file) =~ s/test(\d+)\.sh/"file" . $1 . ".c"/e;
+     next unless -e $c_file;
+     $file_list{$sh_file} = $c_file;
   }
-  foreach my $sh_file (sort keys %file_list) {
+  print Dumper \%file_list;
+  foreach my $sh_file(sort keys %file_list){
     my $c_file = $file_list{$sh_file};
-    eval { &main($sh_file, $c_file) };
+    eval { &main($sh_file,$c_file) };
     print $@ if $@;
     chdir $ORIG_DIR;
   }
-}
-else {
+}else{
   &main(@ARGV);
 }
 

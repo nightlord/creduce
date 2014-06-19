@@ -55,6 +55,7 @@ use Benchmark::Timer;
 use File::Spec;
 use File::Temp;
 use File::Copy;
+use Data::Dumper;
 
 # Load module `Sys::CPU' if it is available.
 eval { require Sys::CPU; Sys::CPU->import(); };
@@ -82,6 +83,7 @@ my $NODEFAULT;
 #
 my $CACHE = 0;
 my $FUZZ = 0;
+my $SCAN_DIR = "";
 
 my @options = (
 #    ["--add-pass",            "call",    0, \&process_foo,     "Also run the specified pass; requires three sub-arguments: pass sub-pass priority"],
@@ -97,6 +99,7 @@ my @options = (
     ["--skip-initial-passes", "const",   1, \$SKIP_FIRST,      "Skip initial passes (useful if input is already reduced)"],
     ["--slow",                "const",   1, \$SLOW,            "Run additional passes that may improve final output slightly, but that might also be very slow"],
     ["--sllooww",             "const",   1, \$SLLOOWW,         "Like --slow but more so"],
+    ["--scan-dir",            "string",   1, \$SCAN_DIR,        "Scan dir, dir contains: testx.sh filex.c"],
     ["--verbose",             "const",   1, \$VERBOSE,         "Print debug information"],
 );
 
@@ -116,7 +119,9 @@ Getopt::Tabular::SetOptionPatterns qw|(--)([\w-]+) (-)(\w+)|;
 Getopt::Tabular::SetHelpOption("--help");
 GetOptions(\@options, \@ARGV) or exit 1;
 # At this point, @ARGV should contain exactly two file names.
-usage() unless (@ARGV == 2);
+unless($SCAN_DIR){
+  usage() unless (@ARGV == 2);
+}
 
 # delete cached results for program sizes this much larger than the
 # current size; this heuristic is designed to save RAM while also
@@ -182,7 +187,7 @@ sub make_tmpdir () {
 sub remove_tmpdirs () {
     return if $SAVE_TEMPS;
     while (my $dir = shift(@tmpdirs)) {
-	File::Path::rmtree ($dir, 0, 0);	
+	File::Path::rmtree ($dir, 0, 0);
     }
 }
 
@@ -654,7 +659,10 @@ sub check_file_attributes($$$) {
 }
 
 ############################### main #################################
+sub main {
+($test,$toreduce) = @_;
 
+print "begin reduce: $test $toreduce\n";
 my $timer = Benchmark::Timer->new();
 $timer->start();
 
@@ -670,11 +678,10 @@ foreach my $mref (@all_methods) {
 }
 print "\n" if $VERBOSE;
 
-$test = File::Spec->rel2abs(shift @ARGV);
+$test = File::Spec->rel2abs($test);
 usage() unless defined($test);
 check_file_attributes("test script", $test, "efrx");
 
-$toreduce = shift @ARGV;
 usage() unless defined($toreduce);
 check_file_attributes("file", $toreduce, "efrw");
 
@@ -777,5 +784,27 @@ print "\n";
 $timer->stop();
 my $time = int($timer->result());
 print "elapsed time: $time seconds\n";
+}
+
+if($SCAN_DIR){
+  die "$SCAN_DIR: $!" unless -e $SCAN_DIR;
+  chdir $SCAN_DIR;
+  my %file_list;
+  foreach my $sh_file(glob "*.sh"){
+     next unless -T $sh_file;
+     (my $c_file = $sh_file) =~ s/test(\d+)\.sh/"file" . $1 . ".c"/e;
+     next unless -e $c_file;
+     $file_list{$sh_file} = $c_file;
+  }
+  print Dumper \%file_list;
+  foreach my $sh_file(sort keys %file_list){
+    my $c_file = $file_list{$sh_file};
+    eval { &main($sh_file,$c_file) };
+    print $@ if $@;
+    chdir $ORIG_DIR;
+  }
+}else{
+  &main(@ARGV);
+}
 
 ######################################################################
